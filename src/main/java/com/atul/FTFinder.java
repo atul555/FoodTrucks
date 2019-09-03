@@ -25,10 +25,13 @@ public class FTFinder {
     public static final String FOOTER = "********** End of list **************";
     public static final String PAGE_HEADER = "    NAME                                                                      ADDRESS";
     public static final String PAGE_FOOTER = "\nPress x to exit, Enter for next page :";
+    public static final String NAME_OF_TRUCK = "applicant";
+    public static final String ADDRESS = "location";
 
     public static void main(String[] args) {
         FTFinder ftf = new FTFinder();
 
+        // Get the current time in SF time zone (PST)
         String pacific = "America/Los_Angeles";
         Instant now = Instant.now();
         ZoneId zoneId = ZoneId.of( pacific );
@@ -37,15 +40,18 @@ public class FTFinder {
         DayOfWeek dow = zdt.getDayOfWeek();
         String day = dow.getDisplayName(TextStyle.FULL, Locale.US);
 
-
+        //Environment variable if testing for a day other than today.
         String day_test = System.getProperty("day");
 
+        //STEP 1: Fetch the list of food trucks for a particular day
         JSONArray truck_list;
         if(day_test != null)
-            truck_list = ftf.fetchData(day_test);
+            truck_list = ftf.fetchData(day_test);   //If day_test is incorrect, it will result in an empty list
         else
             truck_list = ftf.fetchData(day);
 
+        //STEP 2: Filter the data per the hours of operation and hour requested.
+        //Env variable for hour of day, if testing for hour other than now.
         String hours = System.getProperty("hours");
         List<String> lst;
         if(hours !=null ){
@@ -54,12 +60,12 @@ public class FTFinder {
                 ZonedDateTime zdt_test = zdt.withHour(hh);
                 lst = ftf.filter(truck_list, zdt_test);
             } catch(NumberFormatException nme){
-                System.out.println("Incorrect value of hours passed in command line");
+                System.out.println("Incorrect value of hours passed in command line, fetching data for now");
                 lst = ftf.filter(truck_list, zdt);
             }
-
         } else lst = ftf.filter(truck_list, zdt);
 
+        //STEP 3: Display the resulting list in a paginated output on the terminal.
         ftf.render(lst);
     }
 
@@ -75,6 +81,7 @@ public class FTFinder {
             InputStream inStream = connection.getInputStream();
             String json = new Scanner(inStream, "UTF-8").useDelimiter("\\Z").next();
             truck_list = new JSONArray(json);
+            connection.disconnect();
         } catch (JSONException e) {
             System.out.println("Error on parsing data "+ e.toString());
         } catch (IOException ex) {
@@ -86,28 +93,29 @@ public class FTFinder {
     private List<String> filter(JSONArray truck_list, ZonedDateTime zdt) {
         List<String> lst = new ArrayList<>();
         if(truck_list==null)return lst;
+
+        //Iterate thru today's available trucks and add to the lst, the trucks open now.
         for(int i=0; i<truck_list.length(); i++) {
             try {
                 JSONObject truck = truck_list.getJSONObject(i);
 
                 String start = getHH(truck, STARTTIME_KEY);
                 if (start == null) continue;
-                else if(start.length()==3)start="0"+start;
 
                 String end = getHH(truck, ENDTIME_KEY);
                 if (end == null) continue;
-                else if(end.length()==3)end="0"+end;
 
                 String result = LocalTime.parse(start, DateTimeFormatter.ofPattern("hha", Locale.US)).format(DateTimeFormatter.ofPattern("HH"));
-
                 ZonedDateTime zdt_start = zdt.withHour(Integer.parseInt(result)).withMinute(0).withSecond(0);
+
                 result = LocalTime.parse(end, DateTimeFormatter.ofPattern("hha", Locale.US)).format(DateTimeFormatter.ofPattern("HH"));
                 ZonedDateTime zdt_end = zdt.withHour(Integer.parseInt(result)).withMinute(0).withSecond(0);
+
                 if ( zdt.isBefore(zdt_end) && zdt.isAfter(zdt_start) ) {
-                    String vendor = truck.get("applicant").toString();
+                    String vendor = truck.get(NAME_OF_TRUCK).toString();
                     int vlen = vendor.length();
-                    for(int j=0; j<70-vlen; j++)vendor+=" ";
-                    vendor += truck.get("location");
+                    for(int j=0; j<70-vlen; j++)vendor+=" ";    // String with name and address with proper indentation.
+                    vendor += truck.get(ADDRESS);
                     lst.add(vendor);
                 }
             } catch (NumberFormatException  | JSONException e) {
@@ -121,9 +129,10 @@ public class FTFinder {
     private String getHH(JSONObject truck, String timeKey) {
         String boundary = truck.get(timeKey).toString();
         if (boundary.length() < 3 || boundary.length() > 4) {   //It can either be something like 8AM (3), or 11PM (4)
-            System.out.println("Incorrect payload for: " + truck.get("applicant") + ", continuing...");
+            System.out.println("Incorrect payload for: " + truck.get(NAME_OF_TRUCK) + ", continuing...");
             return null;
         }
+        if(boundary.length()==3)boundary="0"+boundary; //append a 0 to make it hh format
         return boundary;
     }
 
@@ -141,9 +150,9 @@ public class FTFinder {
             }
             if(index>=len)
                 break;
-            Scanner myObj = new Scanner(System.in);
+            Scanner scanner = new Scanner(System.in);
             System.out.println(PAGE_FOOTER);
-            String inp = myObj.nextLine();  // Read user input
+            String inp = scanner.nextLine();  // Read user input
             if(inp.equals("x"))
                 return;
             else continue;
